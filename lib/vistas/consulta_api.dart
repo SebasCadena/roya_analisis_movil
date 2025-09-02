@@ -98,8 +98,6 @@ class _ConsultaApiState extends State<ConsultaApi> {
   bool _tablaCreada = false; // Si la tabla ya fue creada
   List<TextEditingController> _controllersHojasPresentes = [];
   List<TextEditingController> _controllersHojasConRoya = [];
-  int _maxHojasConRoya =
-      0; // Máximo número de hojas con roya para generar columnas
 
   // Variables para análisis de imágenes
   Map<String, bool> _analizandoImagen =
@@ -379,28 +377,21 @@ class _ConsultaApiState extends State<ConsultaApi> {
     setState(() {
       _datosTablaRoya![filaIndex]['hojas_con_roya'] = numHojas;
 
-      // Actualizar el máximo de hojas con roya para determinar columnas
-      _maxHojasConRoya = 0;
-      for (var fila in _datosTablaRoya!) {
-        final hojas = fila['hojas_con_roya'] as int;
-        if (hojas > _maxHojasConRoya) {
-          _maxHojasConRoya = hojas;
-        }
-      }
-
-      // Actualizar la lista de porcentajes para todas las filas
-      for (var fila in _datosTablaRoya!) {
-        List<double> porcentajes = List<double>.from(
-          fila['porcentajes_hojas'] ?? [],
-        );
-        while (porcentajes.length < _maxHojasConRoya) {
+      // Ajustar la lista de porcentajes solo para esta fila
+      List<double> porcentajes = List<double>.from(
+        _datosTablaRoya![filaIndex]['porcentajes_hojas'] ?? [],
+      );
+      
+      // Ajustar el tamaño de la lista de porcentajes al número de hojas con roya
+      if (porcentajes.length < numHojas) {
+        while (porcentajes.length < numHojas) {
           porcentajes.add(0.0);
         }
-        if (porcentajes.length > _maxHojasConRoya) {
-          porcentajes = porcentajes.take(_maxHojasConRoya).toList();
-        }
-        fila['porcentajes_hojas'] = porcentajes;
+      } else if (porcentajes.length > numHojas) {
+        porcentajes = porcentajes.take(numHojas).toList();
       }
+      
+      _datosTablaRoya![filaIndex]['porcentajes_hojas'] = porcentajes;
     });
   }
 
@@ -408,7 +399,6 @@ class _ConsultaApiState extends State<ConsultaApi> {
     setState(() {
       _tablaCreada = false;
       _datosTablaRoya = null;
-      _maxHojasConRoya = 0;
 
       // Limpiar controladores
       for (var controller in _controllersHojasPresentes) {
@@ -440,21 +430,6 @@ class _ConsultaApiState extends State<ConsultaApi> {
         } else if (valor is String) {
           suma += double.tryParse(valor) ?? 0.0;
         }
-      }
-    }
-    return suma;
-  }
-
-  double _calcularSumaPorcentajes(int hojaIndex) {
-    if (_datosTablaRoya == null || _datosTablaRoya!.isEmpty) return 0.0;
-
-    double suma = 0.0;
-    for (var fila in _datosTablaRoya!) {
-      List<double> porcentajes = List<double>.from(
-        fila['porcentajes_hojas'] ?? [],
-      );
-      if (hojaIndex < porcentajes.length) {
-        suma += porcentajes[hojaIndex];
       }
     }
     return suma;
@@ -589,17 +564,7 @@ class _ConsultaApiState extends State<ConsultaApi> {
                 const DataColumn(label: Text('Rama No.')),
                 const DataColumn(label: Text('Hojas\npresentes')),
                 const DataColumn(label: Text('Hojas\ncon roya')),
-                // Columnas dinámicas para porcentajes
-                ...List.generate(
-                  _maxHojasConRoya,
-                  (index) => DataColumn(
-                    label: Text(
-                      '% Área Hoja ${index + 1}\n(Manual/AI)',
-                      style: TextStyle(fontSize: 11),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
+                const DataColumn(label: Text('Porcentajes de área por hoja')),
                 const DataColumn(label: Text('Suma área\ncon roya (%)')),
               ],
               rows: [
@@ -658,102 +623,98 @@ class _ConsultaApiState extends State<ConsultaApi> {
                           ),
                         ),
                       ),
-                      // Campos para porcentajes de área afectada
-                      ...List.generate(_maxHojasConRoya, (hojaIndex) {
-                        final String claveAnalisis = '${index}_$hojaIndex';
-                        final bool analizando =
-                            _analizandoImagen[claveAnalisis] ?? false;
-                        final double valorActual =
-                            porcentajes.length > hojaIndex
-                            ? porcentajes[hojaIndex]
-                            : 0.0;
+                      // Campo dinámico para porcentajes de área afectada (basado en hojas con roya de cada fila)
+                      DataCell(
+                        Container(
+                          width: 300, // Ancho fijo para la celda de porcentajes
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: List.generate(fila['hojas_con_roya'] ?? 0, (hojaIndex) {
+                                final String claveAnalisis = '${index}_$hojaIndex';
+                                final bool analizando = _analizandoImagen[claveAnalisis] ?? false;
+                                final double valorActual = porcentajes.length > hojaIndex ? porcentajes[hojaIndex] : 0.0;
 
-                        return DataCell(
-                          SizedBox(
-                            width: 120, // Aumentar ancho para acomodar botón
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Campo de texto para porcentaje
-                                SizedBox(
-                                  height: 35,
-                                  child: TextField(
-                                    key: ValueKey('text_${claveAnalisis}'),
-                                    keyboardType: TextInputType.number,
-                                    textAlign: TextAlign.center,
-                                    controller: TextEditingController(
-                                      text: valorActual > 0
-                                          ? valorActual.toStringAsFixed(1)
-                                          : '',
-                                    ),
-                                    decoration: const InputDecoration(
-                                      border: OutlineInputBorder(),
-                                      contentPadding: EdgeInsets.all(4),
-                                      suffixText: '%',
-                                      isDense: true,
-                                    ),
-                                    onChanged: (value) {
-                                      final porcentaje =
-                                          double.tryParse(value) ?? 0.0;
-                                      setState(() {
-                                        if (hojaIndex < porcentajes.length) {
-                                          porcentajes[hojaIndex] = porcentaje;
-                                        } else {
-                                          // Expandir lista si es necesario
-                                          while (porcentajes.length <=
-                                              hojaIndex) {
-                                            porcentajes.add(0.0);
-                                          }
-                                          porcentajes[hojaIndex] = porcentaje;
-                                        }
-                                        _datosTablaRoya![index]['porcentajes_hojas'] =
-                                            porcentajes;
-                                      });
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                // Botón para análisis de imagen
-                                SizedBox(
-                                  height: 25,
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: analizando
-                                        ? null
-                                        : () => _seleccionarFuenteImagenRoya(
-                                            index,
-                                            hojaIndex,
-                                          ),
-                                    icon: analizando
-                                        ? SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : Icon(Icons.camera_alt, size: 12),
-                                    label: Text(
-                                      analizando ? 'Analizando...' : 'Analizar',
-                                      style: TextStyle(fontSize: 10),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: analizando
-                                          ? Colors.grey
-                                          : Colors.blue,
-                                      foregroundColor: Colors.white,
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 4,
+                                return Container(
+                                  width: 90,
+                                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Hoja ${hojaIndex + 1}',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
                                       ),
-                                      minimumSize: Size(0, 25),
-                                    ),
+                                      const SizedBox(height: 2),
+                                      // Campo de texto para porcentaje
+                                      SizedBox(
+                                        height: 35,
+                                        child: TextField(
+                                          key: ValueKey('text_${claveAnalisis}'),
+                                          keyboardType: TextInputType.number,
+                                          textAlign: TextAlign.center,
+                                          controller: TextEditingController(
+                                            text: valorActual > 0 ? valorActual.toStringAsFixed(1) : '',
+                                          ),
+                                          decoration: const InputDecoration(
+                                            border: OutlineInputBorder(),
+                                            contentPadding: EdgeInsets.all(4),
+                                            suffixText: '%',
+                                            isDense: true,
+                                          ),
+                                          onChanged: (value) {
+                                            final porcentaje = double.tryParse(value) ?? 0.0;
+                                            setState(() {
+                                              if (hojaIndex < porcentajes.length) {
+                                                porcentajes[hojaIndex] = porcentaje;
+                                              } else {
+                                                // Expandir lista si es necesario
+                                                while (porcentajes.length <= hojaIndex) {
+                                                  porcentajes.add(0.0);
+                                                }
+                                                porcentajes[hojaIndex] = porcentaje;
+                                              }
+                                              _datosTablaRoya![index]['porcentajes_hojas'] = porcentajes;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      // Botón para análisis de imagen
+                                      SizedBox(
+                                        height: 25,
+                                        width: double.infinity,
+                                        child: ElevatedButton.icon(
+                                          onPressed: analizando
+                                              ? null
+                                              : () => _seleccionarFuenteImagenRoya(index, hojaIndex),
+                                          icon: analizando
+                                              ? const SizedBox(
+                                                  width: 12,
+                                                  height: 12,
+                                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                                )
+                                              : const Icon(Icons.camera_alt, size: 12),
+                                          label: Text(
+                                            analizando ? 'Analizando...' : 'Analizar',
+                                            style: const TextStyle(fontSize: 10),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: analizando ? Colors.grey : Colors.blue,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                                            minimumSize: const Size(0, 25),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
+                                );
+                              }),
                             ),
                           ),
-                        );
-                      }),
+                        ),
+                      ),
                       // Suma total calculada
                       DataCell(
                         Text(
@@ -792,16 +753,14 @@ class _ConsultaApiState extends State<ConsultaApi> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),
-                    // Totales de porcentajes por columna
-                    ...List.generate(
-                      _maxHojasConRoya,
-                      (hojaIndex) => DataCell(
-                        Text(
-                          '${_calcularSumaPorcentajes(hojaIndex).toStringAsFixed(1)}%',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                    // Celda vacía para la columna de porcentajes individuales
+                    const DataCell(
+                      Text(
+                        '-',
+                        style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),
+                    // Total general de porcentajes (suma de todas las filas)
                     DataCell(
                       Text(
                         '${_calcularSumaTotalPorcentajes().toStringAsFixed(1)}%',
